@@ -1,0 +1,45 @@
+# --- secrets ---
+.env
+
+# --- editor (machine-local) ---
+.vscode/
+
+# --- python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# --- virtualenv (the local bge-m3/torch env; recreate from requirements.txt) ---
+mygov/
+.venv/
+venv/
+
+# --- model / HF caches (multi-GB; downloaded on first run) ---
+.cache/
+.huggingface/
+models/
+
+# --- scraping scratch + debug artifacts at repo root (regenerable) ---
+*.log
+*.tmp
+home.html
+service.html
+sphere1.html
+svc1000.html
+uz-service.xml
+
+# --- intermediate scrape output (regenerable via notebooks/scrape_services.py) ---
+data/raw/
+data/services/
+data/manifest.jsonl
+
+# ---------------------------------------------------------------------------
+# Committed ON PURPOSE so the repo is reproducible without re-scraping/embedding.
+# (Listed here as documentation — these are NOT ignored:)
+#   data/services.jsonl      source service records (scraper output, combined)
+#   data/chunks.jsonl        chunked + synonym-enriched corpus (embedder input)
+#   data/synonyms.jsonl      per-service synonym map (loanwords -> findable)
+#   data/eval_questions.json labeled eval set (hit@k / MRR)
+#   topic_clf.joblib         trained on/off-topic classifier
+# ---------------------------------------------------------------------------

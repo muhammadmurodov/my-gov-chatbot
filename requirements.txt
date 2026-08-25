@@ -1,0 +1,38 @@
+# Pinned to the versions this project was built and tested against.
+# Install into a fresh venv:  pip install -r requirements.txt
+#
+# NOTE: torch is a large, platform-specific wheel. If the plain install picks the
+# wrong build for your CUDA/CPU, install it first from the official index, e.g.:
+#   pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cu121
+
+# --- retrieval + storage ---
+psycopg2-binary==2.9.12
+pgvector==0.5.0
+
+# --- models: embedder (bge-m3) + cross-encoder reranker (bge-reranker-v2-m3) ---
+sentence-transformers==6.0.0
+torch==2.13.0
+transformers==5.15.1
+
+# --- topic classifier (LogisticRegression over query embeddings) ---
+scikit-learn==1.7.2
+numpy==2.2.6
+joblib==1.5.3
+
+# --- answer LLM (OpenRouter, OpenAI-compatible client) ---
+openai==3.3.1
+python-dotenv==1.2.3
+
+# --- API (OpenAI-compatible; the chat UI is Open WebUI, run via docker-compose) ---
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+pydantic==2.13.4
+
+# --- data wrangling (scraping / chunking / eval scripts) ---
+pandas==2.3.3
+
+# --- scraping (dataset build) ---
+httpx==0.28.1
+
+# --- tests ---
+pytest==9.1.1
