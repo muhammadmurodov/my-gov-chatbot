@@ -10,7 +10,9 @@ from dotenv import load_dotenv
 
 load_dotenv()  
 
-DSN = "postgresql://postgres:mygov@localhost:5433/mygov"
+# DB connection string. Read from env so the password isn't baked into source;
+# the localhost value is a local-dev fallback only.
+DSN = os.getenv("DSN", "postgresql://postgres:mygov@localhost:5433/mygov")
 # Pin a real model via OPENROUTER_MODEL for reliable answers + deterministic
 # rewrites; the "openrouter/free" default is a flaky auto-router (varies per call,
 # so temp=0 isn't truly deterministic and low-quality turns pollute chat history).
@@ -41,7 +43,7 @@ def retrieve(question, k=TOP_K):
     cur.execute("""
         SELECT service_id, title, url, text, keywords, 1 - (embedding <=> %s) AS score
         FROM chunks
-        ORDER BY embedding <=> %sif
+        ORDER BY embedding <=> %s
         LIMIT %s;
     """, (qv, qv, k))
     rows = cur.fetchall()

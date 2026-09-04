@@ -10,13 +10,14 @@ rerank.answer -> classifier gate + grounding floor + rerank + LLM. Off-topic /
 ungrounded queries come back as the fixed refusal, same as before.
 
 Run from the repo root (so `data/` paths and the bare `import rerank` chain resolve):
-    uvicorn api:app --app-dir notebooks --port 8000
+    uvicorn api:app --app-dir src --port 8000
 
 Then point Open WebUI at http://<host>:8000/v1 (see docker-compose.yml), or curl it:
     curl -s localhost:8000/v1/chat/completions -H 'content-type: application/json' \
       -d '{"model":"mygov-rag","messages":[{"role":"user","content":"..."}]}'
 """
 import json
+import logging
 import time
 import uuid
 
@@ -25,6 +26,8 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 import rerank  # gated answer path: classifier -> grounding floor -> rerank -> LLM
+
+logger = logging.getLogger("mygov.api")
 
 app = FastAPI(title="my.gov.uz RAG", version="1.0")
 
@@ -52,7 +55,11 @@ def _split_question_and_history(messages: list[Message]):
     for i in range(len(messages) - 1, -1, -1):
         m = messages[i]
         if m.role == "user" and m.content.strip():
-            history = [{"role": p.role, "content": p.content} for p in messages[:i]]
+            # Only real conversation turns are history. Open WebUI can prepend its
+            # own system prompt; sweeping that into history would stack a second
+            # system message on top of our SYSTEM_PROMPT inside the LLM call.
+            history = [{"role": p.role, "content": p.content}
+                       for p in messages[:i] if p.role in ("user", "assistant")]
             return m.content.strip(), history
     return None, []
 
@@ -120,7 +127,20 @@ def chat_completions(req: ChatRequest):
                                "type": "invalid_request_error"}},
         )
 
-    answer_text, rows = rerank.answer(question, history=history)
+    try:
+        answer_text, rows = rerank.answer(question, history=history)
+    except Exception:
+        # Retrieval (DB) or the LLM (all retries exhausted) can raise. Return a
+        # clean OpenAI-shaped error instead of leaking a 500 + stack trace, so the
+        # chat UI shows a graceful message rather than a broken response.
+        logger.exception("answer pipeline failed for question=%r", question)
+        return JSONResponse(
+            status_code=502,
+            content={"error": {
+                "message": "The assistant is temporarily unavailable. Please try again.",
+                "type": "upstream_error",
+            }},
+        )
 
     if req.stream:
         return _stream_response(req.model, answer_text, rows)

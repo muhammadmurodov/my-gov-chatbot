@@ -15,24 +15,24 @@ interface (run via Docker) that talks to the API over its `/v1` endpoints.
 ## Architecture
 
 The corpus is built by scraping the public, server-rendered service pages
-(`notebooks/scrape_services.py`), one JSON record per service. Those records are split
+(`pipeline/scrape_services.py`), one JSON record per service. Those records are split
 into ~500-token retrieval chunks that break on sentence boundaries with a small overlap
-(`notebooks/chunk_with_synonyms.py`); the same step injects a hand-curated synonym map so
+(`pipeline/chunk_with_synonyms.py`); the same step injects a hand-curated synonym map so
 loanwords people actually search for — *tonirovka*, *propiska* — become findable even
 when the official page uses different wording. Each chunk is embedded with `bge-m3` (1024
 dimensions, cosine) and stored in Postgres/pgvector alongside its title, URL, and
-keywords (`notebooks/embed_store.py`).
+keywords (`pipeline/embed_store.py`).
 
 Retrieval is hybrid. A query is answered by two independent searches over the chunk
 table: a vector nearest-neighbour search that matches on *meaning*, and a Postgres
 full-text search that matches on *exact words*. Their ranked lists are fused with
 Reciprocal Rank Fusion, so a chunk that scores well on either signal surfaces
-(`notebooks/hybrid.py`). Before the full-text search runs, every out-of-vocabulary query
+(`src/hybrid.py`). Before the full-text search runs, every out-of-vocabulary query
 token is spell-corrected against a trigram index of the real corpus vocabulary
-(`notebooks/build_vocab.py`), so a typo like *ikadastr* still finds *kadastr*. The fused
+(`pipeline/build_vocab.py`), so a typo like *ikadastr* still finds *kadastr*. The fused
 candidate pool is then re-scored by the `bge-reranker-v2-m3` cross-encoder, which reads
 each (query, chunk) pair together and produces a sharper ordering than either first-stage
-signal alone (`notebooks/rerank.py`).
+signal alone (`src/rerank.py`).
 
 What makes the answers trustworthy is a two-layer grounding gate in front of the LLM.
 First, a logistic-regression classifier over the query embedding estimates the
@@ -49,7 +49,7 @@ Follow-up questions are handled by a single step added *in front* of that gate, 
 the grounding logic untouched. Before anything else, a cheap LLM call rewrites the latest
 message into a standalone query using the recent conversation, so *"narxi qancha?"* after
 a question about kadastr passports becomes *"turar-joy kadastr pasporti narxi qancha?"*
-(`rewrite_query` in `notebooks/rerank.py`). The two context needs are then met
+(`rewrite_query` in `src/rerank.py`). The two context needs are then met
 separately: **retrieval and both gates run on the rewritten standalone query** (so they
 find the right chunks), while the **final answer call also receives the prior turns** (so
 pronouns and tone stay natural). Sessions live in the UI layer — Open WebUI keeps each
@@ -104,19 +104,19 @@ multi-turn, set `OPENROUTER_MODEL` to a pinned model (e.g. `openai/gpt-4o-mini` 
 **4 — Build the index.** The repo already ships the corpus (`data/chunks.jsonl`), so you
 can skip scraping. Embed the chunks into Postgres, then build the typo-fix vocabulary.
 **Run every command from the repo root** — data paths are resolved relative to the
-working directory, and the `notebooks/` scripts import each other by name:
+working directory, and the `src/` app modules import each other by bare name:
 
 ```bash
-python notebooks/embed_store.py     # embed 926 chunks -> pgvector (TRUNCATEs + reloads)
-python notebooks/build_vocab.py     # build the vocab trigram table for typo-fix
+python pipeline/embed_store.py     # embed 926 chunks -> pgvector (TRUNCATEs + reloads)
+python pipeline/build_vocab.py     # build the vocab trigram table for typo-fix
 ```
 
 <details>
 <summary>Optional: rebuild the corpus from scratch instead of using the shipped data</summary>
 
 ```bash
-python notebooks/scrape_services.py                       # -> data/services.jsonl
-python notebooks/chunk_with_synonyms.py \
+python pipeline/scrape_services.py                       # -> data/services.jsonl
+python pipeline/chunk_with_synonyms.py \
     data/services.jsonl data/synonyms.jsonl data/chunks.jsonl   # -> data/chunks.jsonl
 ```
 </details>
@@ -126,7 +126,7 @@ Keep it running in its own terminal. Bind to `0.0.0.0` (not the default `127.0.0
 the Open WebUI container can reach it through `host.docker.internal`:
 
 ```bash
-uvicorn api:app --app-dir notebooks --host 0.0.0.0 --port 8000
+uvicorn api:app --app-dir src --host 0.0.0.0 --port 8000
 ```
 
 It exposes `GET /v1/models` and `POST /v1/chat/completions`. You can hit it directly:
@@ -156,7 +156,7 @@ different host or port, edit that value.
 
 ![screenshot] <!-- Open WebUI chat with the mygov-rag model selected -->
 
-> Batch retrieval eval (hit@1 / hit@5 / MRR) lives in `notebooks/eval_run.py`, run
+> Batch retrieval eval (hit@1 / hit@5 / MRR) lives in `src/eval_run.py`, run
 > directly from the repo root — see [Results](#results).
 
 **Tests.** A small pytest suite proves the critical paths (typo-fix, the grounding gate,
@@ -171,7 +171,7 @@ pytest -v
 
 Retrieval quality on the labeled eval set (`data/eval_questions.json`), and off-topic
 recall from the classifier's held-out test split. _Numbers to be filled from eval runs
-(`python notebooks/eval_run.py`)._
+(`python src/eval_run.py`)._
 
 | Method          | hit@1 | hit@5 | MRR  | off-topic recall |
 |-----------------|:-----:|:-----:|:----:|:----------------:|

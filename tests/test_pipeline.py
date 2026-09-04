@@ -9,13 +9,14 @@ Design:
 
 Run from the repo root:  pytest -v
 """
+import os
 import types
 import pathlib
 
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-DSN = "postgresql://postgres:mygov@localhost:5433/mygov"
+DSN = os.getenv("DSN", "postgresql://postgres:mygov@localhost:5433/mygov")
 
 
 # --------------------------------------------------------------------------- #
