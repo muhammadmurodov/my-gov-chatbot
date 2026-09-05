@@ -111,5 +111,5 @@ def answer(question, history=None, k=5, pool=20):
 if __name__ == "__main__":
     q = sys.argv[1] if len(sys.argv) > 1 else "notarius qabuliga qanday yozilaman?"
     print(f"\nQUERY: {q}\n" + "=" * 60)
-    for sid, title, url, _, score in retrieve(q):
+    for sid, title, url, _, _, score in retrieve(q):
         print(f"  [{score:+.3f}] #{sid}  {title}")

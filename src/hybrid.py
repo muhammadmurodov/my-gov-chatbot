@@ -135,5 +135,5 @@ def answer(question, k=5):
 if __name__ == "__main__":
     q = sys.argv[1] if len(sys.argv) > 1 else "kadastr pasporti qanday olinadi?"
     print(f"\nQUERY: {q}\n" + "=" * 60)
-    for sid, title, url, _, score in hybrid_retrieve(q):
+    for sid, title, url, _, _, score in hybrid_retrieve(q):
         print(f"  [{score:.4f}] #{sid}  {title}")
