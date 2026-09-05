@@ -5,6 +5,7 @@ Pipeline: hybrid (vector+FTS+RRF) -> 20 candidates -> cross-encoder -> best 5 ->
   python rerank.py "notarius qabuliga qanday yozilaman?"
 """
 import os
+import re
 import sys
 import time
 import joblib
@@ -40,14 +41,44 @@ CLF_OFFTOPIC = 0.15        # classifier: below this P(on-topic), refuse
 HISTORY_TURNS = 8          # how many prior messages to feed the rewriter / LLM
 
 
+# Anaphora / ellipsis cues that mark a question as leaning on prior turns — a
+# genuine follow-up ("uning narxi qancha?", "а сколько стоит?"). Rewriting only
+# fires for these (or very short questions); a self-contained new-topic question
+# like "tonirovka ruxsatnomasi necha pul" is left alone, so the previous topic
+# can't be dragged into it by the rewriter.
+_FOLLOWUP_CUES = {
+    # uz
+    "uning", "buning", "shuning", "uni", "buni", "shuni", "unga", "bunga",
+    "undan", "bundan", "u", "bu", "shu", "o'sha", "osha", "yuqoridagi",
+    "yana", "ham", "-chi", "chi", "va",
+    # ru
+    "его", "ее", "её", "их", "это", "этот", "эта", "том", "нем", "нём",
+    "туда", "тоже", "также", "а",
+}
+# At or below this many word tokens a question is treated as elliptical (e.g.
+# "narxi qancha?", "muddati?") and rewritten against history.
+_REWRITE_MAX_STANDALONE_TOKENS = 2
+
+
+def _needs_rewrite(question):
+    """True if the question looks context-dependent (a genuine follow-up) and so
+    should be rewritten against history; False if it is already self-contained."""
+    toks = re.findall(r"\w+", question.lower())
+    if len(toks) <= _REWRITE_MAX_STANDALONE_TOKENS:
+        return True                                  # very short -> likely elliptical
+    return any(t in _FOLLOWUP_CUES for t in toks)    # explicit anaphora/continuation
+
+
 def rewrite_query(history, question):
     """Turn a follow-up into a standalone query using conversation history.
 
     history = list of {"role","content"} for PRIOR turns (not incl. current).
-    On the first turn — or if the rewrite call fails — return the raw question,
-    so a rewriter failure degrades to single-turn behavior instead of crashing.
+    Returns the raw question unchanged on the first turn, when the question is
+    already self-contained (see _needs_rewrite — avoids dragging the prior topic
+    into a new-topic question), or if the rewrite call fails — so a rewriter
+    failure degrades to single-turn behavior instead of crashing.
     """
-    if not history:
+    if not history or not _needs_rewrite(question):
         return question
 
     convo = "\n".join(f"{m['role']}: {m['content']}" for m in history[-HISTORY_TURNS:])

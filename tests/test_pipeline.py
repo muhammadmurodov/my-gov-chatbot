@@ -181,6 +181,30 @@ def test_rewrite_query_falls_back_on_error(pipeline, monkeypatch):
     assert out == "narxi qancha?"                  # fell back to the raw question
 
 
+def test_rewrite_skips_selfcontained_new_topic(pipeline, monkeypatch):
+    """Regression: a self-contained question on a NEW topic must NOT be rewritten,
+    so the previous topic can't leak in. Here the prior turn was about kadastr; the
+    new question is a full tonirovka question and must pass through untouched, with
+    no LLM rewrite call."""
+    calls = []
+    _mock_llm(monkeypatch, pipeline, reply="CONTAMINATED_BY_KADASTR", recorder=calls)
+    history = [{"role": "user", "content": "kadastr haqida malumot ber"},
+               {"role": "assistant", "content": "Kadastr xizmatlari ..."}]
+    q = "tonirovka ruxsatnomasini olish necha pul"
+    assert pipeline.rerank.rewrite_query(history, q) == q
+    assert calls == []                             # self-contained -> no rewrite call
+
+
+def test_needs_rewrite_classification(pipeline):
+    """The follow-up gate: short/anaphoric questions rewrite; self-contained don't."""
+    nr = pipeline.rerank._needs_rewrite
+    assert nr("narxi qancha?")                     # 2 tokens -> elliptical
+    assert nr("muddati?")                          # 1 token
+    assert nr("uning narxi qancha")                # anaphora "uning"
+    assert not nr("tonirovka ruxsatnomasini olish necha pul")  # self-contained
+    assert not nr("kadastr haqida malumot ber")    # self-contained
+
+
 # --------------------------------------------------------------------------- #
 # 7. API layer — history filtering + endpoint contract (no DB/network)
 # --------------------------------------------------------------------------- #
