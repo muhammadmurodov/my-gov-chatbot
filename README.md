@@ -181,8 +181,13 @@ curl -s localhost:8000/v1/chat/completions \
 ```
 
 On-topic queries return a grounded answer plus the services that grounded it (in a
-non-standard `sources` field); off-topic queries such as *"bugun ob-havo qanday?"* return
-the fixed refusal, `Menda bu haqda ishonchli ma'lumot yo'q.`
+non-standard `sources` field). Queries that can't be answered get a short, reason-aware
+refusal that acknowledges the question **without answering it** — the two failure modes
+are kept apart: **out-of-scope** (the classifier judges it isn't a my.gov.uz topic, e.g.
+*"bugun ob-havo qanday?"*) vs. **no supporting context** (plausibly on-topic, but retrieval
+found nothing that grounds an answer). Each refusal is written by a guarded fallback LLM
+call that degrades to a fixed per-reason sentence (e.g. `Menda bu haqda ishonchli ma'lumot
+yo'q.`) if the model is unavailable, so the refusal path never errors or hallucinates.
 
 ### 6. Start the Open WebUI chat frontend
 
@@ -237,8 +242,9 @@ top 5 for every question, and plain hybrid retrieval is strong enough that the c
 doesn't improve top-1 here — on a set this clean, reranking mostly reshuffles items that are
 already correct. The reranker earns its keep on larger, noisier candidate pools where the
 first-stage ordering is less reliable; it is kept in the default path for that robustness,
-and the grounding floor reads its score. The off-topic gate refuses all six adversarial
-questions (weather, small talk, arithmetic, insults) with zero LLM calls.
+and the grounding floor reads its score. The classifier gate refuses all six adversarial
+questions (weather, small talk, arithmetic, insults) before any retrieval; each refusal is
+then phrased by a single guarded fallback call (see *Refusals* below).
 
 ---
 
@@ -252,6 +258,7 @@ Set in `.env` (copied from `.env.example`). Only `OPENROUTER_API_KEY` is require
 | `OPENROUTER_MODEL`   |    no    | `openrouter/free`                                | Which model answers and rewrites. The free auto-router is flaky (varies per call); **pin a real model** (e.g. `openai/gpt-4o-mini`, `google/gemini-2.0-flash-001`) for reliable multi-turn. |
 | `DSN`                |    no    | `postgresql://postgres:mygov@localhost:5433/mygov` | Postgres connection string. Override to point at another DB or to keep the password out of source.        |
 | `HF_TOKEN`           |    no    | —                                                | Raises Hugging Face download rate limits. Not needed once the models are cached.                            |
+| `MYGOV_QUERY_LOG`    |    no    | — (off)                                          | Path to a JSONL file. When set, every gated decision (classifier prob, top rerank score, which gate fired) is appended — the raw data for `eval/calibrate.py`. No-op when unset. |
 
 ---
 
@@ -265,6 +272,9 @@ Set in `.env` (copied from `.env.example`). Only `OPENROUTER_API_KEY` is require
 │   ├── hybrid.py            # vector + FTS + RRF fusion, typo-fix, connection pool
 │   ├── rerank.py            # cross-encoder rerank + two-layer gate + follow-up rewrite (answer entrypoint)
 │   └── eval_run.py          # hit@1 / hit@5 / MRR eval
+├── eval/                    # gate-threshold calibration
+│   ├── calibrate.py         # sweep CLF_OFFTOPIC / GATE_FLOOR on labeled data (no answer LLM)
+│   └── labeled_seed.csv     # starter label set (grow it with MYGOV_QUERY_LOG traffic)
 ├── pipeline/                # offline corpus build (run once, in order)
 │   ├── scrape_services.py   # my.gov.uz → data/services.jsonl
 │   ├── chunk_with_synonyms.py  # chunk + inject synonyms → data/chunks.jsonl
@@ -293,6 +303,38 @@ pytest -v
 
 > **Sharing a GPU with the running API?** The API holds both models in VRAM, so a
 > GPU-backed test run can OOM. Force the tests onto CPU: `CUDA_VISIBLE_DEVICES="" pytest -v`.
+
+---
+
+## Refusals & gate calibration
+
+A query that can't be answered is refused, and the two failure modes are kept apart
+(`src/rerank.py`):
+
+- **`OUT_OF_SCOPE`** — the classifier judges it isn't a my.gov.uz topic (weather, sports, code).
+- **`NO_SUPPORTING_CONTEXT`** — plausibly on-topic, but the reranker floor found nothing that
+  grounds an answer.
+
+Each refusal is written by `fallback_response()`: a single **guarded** LLM call that
+acknowledges the question in its own language without answering it, and **degrades to a fixed
+per-reason sentence** on any error, empty output, or over-long reply — so the refusal path
+never errors, stalls on retries, or turns into a hallucination surface.
+
+Both gates run on thresholds (`CLF_OFFTOPIC`, `GATE_FLOOR`) that should be **calibrated on
+data, not guessed**. To do that:
+
+1. Turn on logging in production: `MYGOV_QUERY_LOG=queries.jsonl` records each decision's
+   classifier prob + top rerank score.
+2. Label a set of questions (`question,label` CSV — see `eval/labeled_seed.csv` for the
+   format and a starter set seeded from real services). Grow it with the logged traffic.
+3. Sweep both thresholds against the labels — no answer LLM is called, so it's cheap:
+
+   ```bash
+   CUDA_VISIBLE_DEVICES="" ./mygov/bin/python eval/calibrate.py eval/labeled_seed.csv
+   ```
+
+   It reports, per threshold, the trade-off between false-accepts (a bad query admitted) and
+   false-rejects (a good one refused), and suggests values that minimize total gate errors.
 
 ---
 

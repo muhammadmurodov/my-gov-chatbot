@@ -81,17 +81,34 @@ def test_typo_fix_leaves_correct_word_unchanged(pipeline, db_cursor):
 # --------------------------------------------------------------------------- #
 # 2. two-layer grounding gate
 # --------------------------------------------------------------------------- #
-def test_offtopic_refuses_without_calling_llm(pipeline, monkeypatch):
-    """Classifier gate (P<0.15) must refuse BEFORE any LLM call. No DB needed:
-    the refusal happens before retrieval."""
+def test_offtopic_uses_guarded_fallback(pipeline, monkeypatch):
+    """Classifier gate (P<0.15) refuses BEFORE retrieval, but now via a reactive
+    fallback_response() LLM call — no DB touched (rows stay empty), exactly one LLM
+    call (the fallback, not an answer), and the reply is that fallback's text."""
     calls = []
-    _mock_llm(monkeypatch, pipeline,
-              reply=AssertionError("LLM must not be called for an off-topic query"),
-              recorder=calls)
+    _mock_llm(monkeypatch, pipeline, reply="FALLBACK_REPLY", recorder=calls)
     ans, rows = pipeline.rerank.answer("bugun ob-havo qanday?")
-    assert ans == "Menda bu haqda ishonchli ma'lumot yo'q."
-    assert rows == []
-    assert calls == []  # gate short-circuited before the LLM
+    assert ans == "FALLBACK_REPLY"
+    assert rows == []                   # off-topic -> no retrieval
+    assert len(calls) == 1             # the guarded fallback, and nothing else
+
+
+def test_fallback_degrades_to_static_when_llm_down(pipeline, monkeypatch):
+    """The refusal path must never itself error: if the fallback LLM call raises,
+    fallback_response returns the fixed per-reason string instead of propagating."""
+    _mock_llm(monkeypatch, pipeline, reply=RuntimeError("openrouter down"))
+    rk = pipeline.rerank
+    assert rk.fallback_response("q", rk.OUT_OF_SCOPE) == rk._HARD_FALLBACK[rk.OUT_OF_SCOPE]
+    assert (rk.fallback_response("q", rk.NO_SUPPORTING_CONTEXT)
+            == rk._HARD_FALLBACK[rk.NO_SUPPORTING_CONTEXT])
+
+
+def test_fallback_degrades_to_static_when_reply_overlong(pipeline, monkeypatch):
+    """A model that starts smuggling a real answer runs long; an over-cap reply is
+    treated as a leak and swapped for the hard fallback."""
+    rk = pipeline.rerank
+    _mock_llm(monkeypatch, pipeline, reply="x" * (rk._FALLBACK_MAX_CHARS + 1))
+    assert rk.fallback_response("q", rk.OUT_OF_SCOPE) == rk._HARD_FALLBACK[rk.OUT_OF_SCOPE]
 
 
 def test_ontopic_lowscore_passes_floor(pipeline, db_cursor, monkeypatch):
