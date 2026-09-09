@@ -151,15 +151,57 @@ def fallback_response(question, reason):
 _FOLLOWUP_CUES = {
     # uz
     "uning", "buning", "shuning", "uni", "buni", "shuni", "unga", "bunga",
-    "undan", "bundan", "u", "bu", "shu", "o'sha", "osha", "yuqoridagi",
+    "undan", "bundan", "u", "bu", "shu", "ushbu", "o'sha", "osha", "yuqoridagi",
+    "ular", "ularni", "ularning", "ulardan", "ularga",
     "yana", "ham", "-chi", "chi", "va",
     # ru
-    "его", "ее", "её", "их", "это", "этот", "эта", "том", "нем", "нём",
+    "его", "ее", "её", "их", "они", "это", "этот", "эта", "том", "нем", "нём",
     "туда", "тоже", "также", "а",
 }
 # At or below this many word tokens a question is treated as elliptical (e.g.
 # "narxi qancha?", "muddati?") and rewritten against history.
 _REWRITE_MAX_STANDALONE_TOKENS = 2
+
+# Every answer prints its sources as "Xizmat: <title>" + "URL: .../service/<id>",
+# and Open WebUI resends that assistant text verbatim, so we can recover exactly
+# which services were on screen. Used to anchor the rewriter (see below).
+_SERVICE_URL_RE = re.compile(r"my\.gov\.uz/\w+/service/(\d+)")
+# How many recently-cited services to name to the rewriter as the anaphora anchor.
+_MAX_CITED_ANCHORS = 6
+
+
+def _recent_cited_services(history):
+    """(service_id, title) pairs cited in the most recent assistant turn that named
+    any service, newest turn first. This is what "shu/bu/ular xizmat(lar)" refers to
+    — the services just shown — so we hand it to the rewriter explicitly instead of
+    letting it guess from a long transcript that mentions many services. Returns []
+    if no prior assistant turn cited a service (e.g. the last turn was a refusal)."""
+    for m in reversed(history):
+        if m.get("role") != "assistant":
+            continue
+        lines = [ln.strip() for ln in (m.get("content") or "").splitlines()]
+        out, seen = [], set()
+        for i, ln in enumerate(lines):
+            match = _SERVICE_URL_RE.search(ln)
+            if not match:
+                continue
+            sid = match.group(1)
+            if sid in seen:
+                continue
+            seen.add(sid)
+            # Our answers put the service name on the line right above its URL,
+            # optionally prefixed with a list marker or "Xizmat:". Recover it as the
+            # nearest preceding non-empty, non-URL line.
+            title = ""
+            for j in range(i - 1, -1, -1):
+                if lines[j] and not _SERVICE_URL_RE.search(lines[j]):
+                    title = re.sub(r"^\s*(?:\d+[.)]\s*|[-*]\s*|Xizmat:\s*)", "",
+                                   lines[j]).strip("* ")
+                    break
+            out.append((sid, title))
+        if out:
+            return out[:_MAX_CITED_ANCHORS]
+    return []
 
 
 def _needs_rewrite(question):
@@ -184,12 +226,31 @@ def rewrite_query(history, question):
         return question
 
     convo = "\n".join(f"{m['role']}: {m['content']}" for m in history[-HISTORY_TURNS:])
+
+    # Anchor anaphora to the services actually just shown. Without this the rewriter
+    # has to infer "these services" from the whole transcript, which mentions many —
+    # so "Shu xizmatlardan necha kishi foydalangan" re-retrieved on generic wording
+    # and landed on unrelated high-traffic services instead of the one just discussed.
+    cited = _recent_cited_services(history[-HISTORY_TURNS:])
+    anchor = ""
+    if cited:
+        listing = "; ".join(f"#{sid} {title}".strip() for sid, title in cited)
+        anchor = (
+            "\nOXIRGI JAVOBDA MUHOKAMA QILINGAN XIZMAT(LAR) (eng oxirgi mavzu, "
+            f"birinchisi ASOSIY): {listing}\n"
+            "Agar oxirgi savol 'bu', 'shu', 'ushbu', 'o'sha', 'ular', 'bular' kabi "
+            "ishora orqali xizmat(lar)ga murojaat qilsa, ularni AYNAN yuqoridagi "
+            "xizmat(lar)ga bog'la va qayta yozilgan savolda xizmat nomini yoz. "
+            "YAKKA xizmatga ishora ('bu/shu/ushbu xizmat') bo'lsa, uni ro'yxatdagi "
+            "BIRINCHI (asosiy) xizmatga bog'la.\n"
+        )
+
     prompt = (
         "Quyidagi suhbat asosida foydalanuvchining oxirgi savolini "
         "mustaqil, to'liq savolga aylantir. Faqat qayta yozilgan savolni qaytar, "
         "boshqa hech narsa yozma. Agar savol allaqachon mustaqil bo'lsa, "
         "uni o'zgartirmasdan qaytar.\n\n"
-        f"SUHBAT:\n{convo}\n\nOXIRGI SAVOL: {question}\n\nQAYTA YOZILGAN SAVOL:"
+        f"SUHBAT:\n{convo}\n{anchor}\nOXIRGI SAVOL: {question}\n\nQAYTA YOZILGAN SAVOL:"
     )
     try:
         resp = rag._client.chat.completions.create(
@@ -205,6 +266,11 @@ def rewrite_query(history, question):
 
 def answer(question, history=None, k=5, pool=20):
     history = history or []
+    # A genuine follow-up leans on prior turns; a self-contained new-topic question
+    # does not. Same signal drives BOTH the rewrite and whether the answer call sees
+    # history (see below) — they must agree, or a topic switch gets rewritten clean
+    # but then re-contaminated by history at answer time.
+    is_followup = bool(history) and _needs_rewrite(question)
     standalone = rewrite_query(history, question)   # resolve references first
 
     # NOTE: micro-opt for later — emb is embedded here and again inside
@@ -226,11 +292,16 @@ def answer(question, history=None, k=5, pool=20):
 
     _log_query(question, standalone, p, top_score, "ANSWERED")
 
-    # Retrieval uses the standalone query (right chunks); the answer call ALSO gets
-    # history (natural pronouns/tone). Two different context needs, handled apart.
-    user_msg = f"KONTEKST:\n{rag.build_context(rows)}\n\nSAVOL: {standalone}"
+    # Retrieval uses the standalone query (right chunks). The answer call gets history
+    # ONLY for a real follow-up (natural pronouns/tone on the same topic). On a topic
+    # switch (is_followup=False) history is withheld: otherwise the model drags the
+    # previous topic into the new answer — e.g. answering "Work and travel xizmatlari"
+    # by first refusing the earlier "bolamni bog'chaga" topic. The rewrite has already
+    # folded any needed context into `standalone`, so history is redundant here anyway.
+    user_msg = f"MA'LUMOT:\n{rag.build_context(rows)}\n\nSAVOL: {standalone}"
     messages = [{"role": "system", "content": rag.SYSTEM_PROMPT}]
-    messages += history[-HISTORY_TURNS:]
+    if is_followup:
+        messages += history[-HISTORY_TURNS:]
     messages.append({"role": "user", "content": user_msg})
 
     last = None
@@ -241,9 +312,15 @@ def answer(question, history=None, k=5, pool=20):
                 messages=messages,
                 temperature=0.2,
             )
-            return resp.choices[0].message.content, rows
+            content = resp.choices[0].message.content
+            if content and content.strip():
+                return content, rows
+            # Empty/None content is not an exception but is still a failure — the UI
+            # would render a blank answer. Treat it as retriable like a transient error.
+            last = ValueError("LLM returned empty content")
         except Exception as e:
             last = e
+        if attempt < 3:
             time.sleep(2 * (attempt + 1))
     raise last
 

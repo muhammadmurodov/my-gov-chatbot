@@ -1,5 +1,15 @@
 # my.gov.uz RAG — Uzbek Government-Services Q&A
 
+> Grounded, citation-backed answers about Uzbek government services — in Uzbek and Russian —
+> that refuse rather than guess.
+
+![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
+![Postgres + pgvector](https://img.shields.io/badge/store-Postgres%20%2B%20pgvector-336791?logo=postgresql&logoColor=white)
+![Embeddings](https://img.shields.io/badge/embeddings-bge--m3-6E56CF)
+![Reranker](https://img.shields.io/badge/reranker-bge--reranker--v2--m3-6E56CF)
+![API](https://img.shields.io/badge/API-OpenAI--compatible-000000)
+![License](https://img.shields.io/badge/use-research%20%26%20education-informational)
+
 A retrieval-augmented question-answering system over the public service catalog of
 [my.gov.uz](https://my.gov.uz). It answers questions in **Uzbek and Russian** about how to
 obtain government services — required documents, fees, deadlines, and steps — grounded
@@ -12,7 +22,33 @@ against **Postgres + pgvector**, with **`bge-m3`** for embeddings and
 fronted by an [Open WebUI](https://github.com/open-webui/open-webui) chat interface that
 talks to the API over its `/v1` endpoints.
 
-<!-- Add a screenshot here once captured: ![Open WebUI chat answering a service question with a citation](docs/chat.png) -->
+**Contents:** [Demo](#demo) · [Highlights](#highlights) · [Architecture](#architecture) ·
+[Quickstart](#quickstart) · [Results](#results) · [Configuration](#configuration) ·
+[Project structure](#project-structure) · [Tests](#tests) ·
+[Refusals & gate calibration](#refusals--gate-calibration) ·
+[Documentation](#documentation)
+
+## Demo
+
+Real conversations in the Open WebUI frontend — grounded answers with citations, multi-turn
+context, and reason-aware refusals, all in Uzbek.
+
+**Grounded answer + out-of-scope refusal.** A car-history question is answered from service
+**/621** (fee, steps, documents); an off-topic question — *"who founded Telegram?"* — is
+politely refused instead of answered:
+
+![Grounded answer and an out-of-scope refusal](docs/screenshots/01-grounded-and-refusal.png)
+
+**Multi-service answer + context-carrying follow-up.** One query returns every related
+tinting-permit service with its price tiers and citations; the follow-up *"how many people
+used these?"* is resolved against the previous turn, not re-guessed:
+
+![Multi-service answer and a context follow-up](docs/screenshots/02-multi-service-and-context.png)
+
+**Broad multi-service listing.** A single topic query — military-service–related services —
+returns the full set, each with its own citation:
+
+![Multi-service listing with citations](docs/screenshots/03-multi-service.png)
 
 ---
 
@@ -48,7 +84,7 @@ flowchart TD
 
     subgraph serve["Online — request path (src/)"]
         Q[User question] --> RW[rewrite_query<br/>follow-up → standalone]
-        RW --> G1{Classifier gate<br/>P on-topic ≥ 0.15?}
+        RW --> G1{Classifier gate<br/>P on-topic ≥ 0.20?}
         G1 -- no --> R[Refuse:<br/>&quot;Menda bu haqda<br/>ishonchli ma'lumot yo'q.&quot;]
         G1 -- yes --> H[Hybrid retrieve<br/>vector + FTS → RRF]
         H --> RR[Cross-encoder rerank<br/>bge-reranker-v2-m3]
@@ -335,6 +371,16 @@ data, not guessed**. To do that:
 
    It reports, per threshold, the trade-off between false-accepts (a bad query admitted) and
    false-rejects (a good one refused), and suggests values that minimize total gate errors.
+
+---
+
+## Documentation
+
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — service topology, the full request
+  lifecycle, the Postgres data model, the offline corpus build, and the design decisions
+  (and deliberate non-goals) behind the single-node deployment.
+- **[AGENTS.md](AGENTS.md)** — operational guide for contributors and AI coding agents:
+  setup, run, test, conventions, and the repo's real gotchas.
 
 ---
 
