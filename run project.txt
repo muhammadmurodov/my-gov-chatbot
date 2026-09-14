@@ -1,2 +1,0 @@
- cd "/mnt/NewData/vs code/My-gov" 
-  HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./mygov/bin/python /tmp/claude-1000/-mnt-NewData-vs-code-My-gov/eab81544-5b68-4508-96dd-5ed9a9b06cc5/scratchpad/run_api.py 
