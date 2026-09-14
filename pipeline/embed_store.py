@@ -12,13 +12,15 @@ Run:
 First run downloads bge-m3 (~2.2 GB). It auto-uses your GPU if CUDA is present.
 Re-running is safe: it TRUNCATEs and reloads.
 """
+import os
 import json
 import psycopg2
 from psycopg2.extras import execute_values
 from pgvector.psycopg2 import register_vector
 from sentence_transformers import SentenceTransformer
 
-DSN = "postgresql://postgres:mygov@localhost:5433/mygov"
+# Read from env so the DB password isn't baked into source; localhost is dev-only.
+DSN = os.getenv("DSN", "postgresql://postgres:mygov@localhost:5433/mygov")
 MODEL = "BAAI/bge-m3"
 CHUNKS = "data/chunks.jsonl"
 DIM = 1024         

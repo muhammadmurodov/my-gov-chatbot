@@ -5,9 +5,23 @@ Phase 2 - hybrid retrieval: vector + full-text, fused with RRF.
 import sys
 import time
 import psycopg2
+import psycopg2.pool
 from pgvector.psycopg2 import register_vector
 import rag  # reuse embedder, DSN, LLM client, prompt
 import re
+
+# One shared connection pool instead of connect()/close() per request. Under
+# Open WebUI's default streaming each turn hits the DB, and uvicorn runs sync
+# endpoints across a threadpool — so use the threaded pool. Created lazily so
+# importing this module never needs a live DB (tests import it without one).
+_CONN_POOL = None
+
+
+def _get_conn_pool():
+    global _CONN_POOL
+    if _CONN_POOL is None:
+        _CONN_POOL = psycopg2.pool.ThreadedConnectionPool(1, 10, rag.DSN)
+    return _CONN_POOL
 
 def correct_query(cur, question, min_sim=0.45, min_len=4):
     """Replace out-of-vocabulary tokens with the closest real corpus word."""
@@ -70,26 +84,33 @@ def rrf(*ranked_lists, k=60):
 
 
 def hybrid_retrieve(question, top_k=5, pool=20):
-    conn = psycopg2.connect(rag.DSN)
-    register_vector(conn)
-    cur = conn.cursor()
-    ensure_fts(cur)
-    conn.commit()
+    conn_pool = _get_conn_pool()
+    conn = conn_pool.getconn()
+    try:
+        register_vector(conn)  # idempotent per connection; sets up the vector adapter
+        cur = conn.cursor()
+        ensure_fts(cur)
+        conn.commit()
 
-    q_fts, changed = correct_query(cur, question)
-    if changed:
-        print(f"  [typo-fix] {changed}")
+        q_fts, changed = correct_query(cur, question)
+        if changed:
+            print(f"  [typo-fix] {changed}")
 
-    qv = rag._embedder.encode(question, normalize_embeddings=True)  # ORIGINAL
-    fused = rrf(vector_ids(cur, qv, pool), fts_ids(cur, q_fts, pool))[:top_k]
-    rows = []
-    for cid, score in fused:
-        cur.execute("SELECT service_id, title, url, text, keywords FROM chunks WHERE chunk_id=%s", (cid,))
-        sid, title, url, text, keywords = cur.fetchone()
-        rows.append((sid, title, url, text, keywords, score))
-    cur.close()
-    conn.close()
-    return rows
+        qv = rag._embedder.encode(question, normalize_embeddings=True)  # ORIGINAL
+        fused = rrf(vector_ids(cur, qv, pool), fts_ids(cur, q_fts, pool))[:top_k]
+        rows = []
+        for cid, score in fused:
+            cur.execute("SELECT service_id, title, url, text, keywords FROM chunks WHERE chunk_id=%s", (cid,))
+            sid, title, url, text, keywords = cur.fetchone()
+            rows.append((sid, title, url, text, keywords, score))
+        cur.close()
+        conn.commit()
+        return rows
+    except Exception:
+        conn.rollback()  # leave the pooled connection clean, not mid-aborted-txn
+        raise
+    finally:
+        conn_pool.putconn(conn)
 
 
 def answer(question, k=5):
@@ -114,5 +135,5 @@ def answer(question, k=5):
 if __name__ == "__main__":
     q = sys.argv[1] if len(sys.argv) > 1 else "kadastr pasporti qanday olinadi?"
     print(f"\nQUERY: {q}\n" + "=" * 60)
-    for sid, title, url, _, score in hybrid_retrieve(q):
+    for sid, title, url, _, _, score in hybrid_retrieve(q):
         print(f"  [{score:.4f}] #{sid}  {title}")

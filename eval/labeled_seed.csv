@@ -1,0 +1,57 @@
+question,label
+"Shifokor qabuliga qanday yozilaman?",in_domain
+"ID karta olish yoki almashtirish uchun qanday ariza yuboraman?",in_domain
+"Turar-joy kadastr pasportini qanday shakllantiraman?",in_domain
+"Narkologiya dispanseridan ma'lumotnoma qanday olinadi?",in_domain
+"Rentgen uskunasidan foydalanish uchun ruxsatnoma qanday olinadi?",in_domain
+"Pensiya to'lovini naqd pul shakliga qanday o'tkazaman?",in_domain
+"Davlat uy-joy fondi obyektini xususiylashtirish uchun qanday ariza beraman?",in_domain
+"Kasbiy va oliy ta'lim to'lovini qanday to'layman?",in_domain
+"Yashash joyi manzil ma'lumotini qanday tahrirlayman?",in_domain
+"Tibbiy faoliyat litsenziyasi qanday olinadi?",in_domain
+"Sanitariya-epidemiologiya tekshiruv natijalarini qanday olaman?",in_domain
+"Transport vositalari ijara shartnomalarini qanday hisobga qo'yaman?",in_domain
+"Xorijda olingan o'rta ta'lim hujjatini qanday tan oldiraman?",in_domain
+"Zo'ravonlikdan jabrlangan xotin-qizlarga himoya orderini qanday olaman?",in_domain
+"Qimmatli qog'ozlar faoliyati uchun attestatsiyadan qanday o'taman?",in_domain
+"Kommunal ma'lumotlarni qanday tahrirlayman?",in_domain
+"Maktab direktori nomzodiga menejerlik sertifikati qanday beriladi?",in_domain
+"Pivo mahsulotlari bilan chakana savdoni boshlash haqida xabarnomani qanday yuboraman?",in_domain
+"Zargarlik buyumlarini O'zbekistondan olib chiqish uchun xulosa qanday olinadi?",in_domain
+"Gaz va energiya iste'moli o'rtasidagi farqni qanday qoplataman?",in_domain
+"Yer qaridan foydalanish litsenziyasini ruxsatnomaga qanday almashtiraman?",in_domain
+"Talabalar uchun oylik ijara to'lovlari bo'yicha ma'lumotni qanday olaman?",in_domain
+"tonirovka ruxsatnomasi qanday olinadi?",in_domain
+"Bugun Toshkentda ob-havo qanday?",off_topic
+"Python'da list nima?",off_topic
+"Futbol bo'yicha O'zbekiston qachon o'ynaydi?",off_topic
+"Eng yaqin pizza qayerda sotiladi?",off_topic
+"Osh qanday tayyorlanadi?",off_topic
+"Bitcoin narxi qancha?",off_topic
+"Menga bahor haqida she'r yozib ber.",off_topic
+"iPhone 15 narxi qancha?",off_topic
+"Qaysi film bugun kinoteatrda namoyish etiladi?",off_topic
+"2 qo'shuv 2 nechaga teng?",off_topic
+"Ingliz tilini qanday tez o'rganaman?",off_topic
+"Eng yaxshi mashina qaysi brend?",off_topic
+"Kecha futbol o'yinida kim g'olib chiqdi?",off_topic
+"Mona Liza suratini kim chizgan?",off_topic
+"Qanday qilib tez vazn kamaytiraman?",off_topic
+"Eng mazali milliy taom qaysi?",off_topic
+"JavaScript va Python o'rtasidagi farq nima?",off_topic
+"Salom, ishlaring qalay?",off_topic
+"Marsda hayot bormi?",off_topic
+"O'zbekiston prezidenti kim?",in_domain_no_answer
+"O'zbekiston Konstitutsiyasi nechanchi yilda qabul qilingan?",in_domain_no_answer
+"O'zbekistonda nechta viloyat bor?",in_domain_no_answer
+"Davlat bayrog'ida nechta yulduz bor?",in_domain_no_answer
+"O'zbekiston qachon mustaqillikka erishgan?",in_domain_no_answer
+"Oliy Majlis necha palatadan iborat?",in_domain_no_answer
+"O'zbekistonning poytaxti qaysi shahar?",in_domain_no_answer
+"Bosh vazir kim?",in_domain_no_answer
+"Pasport haqida ma'lumot ber.",ambiguous
+"Litsenziya qanday olinadi?",ambiguous
+"Soliq to'lovi qanday amalga oshiriladi?",ambiguous
+"Ro'yxatdan o'tish uchun nima kerak?",ambiguous
+"Ruxsatnoma olish uchun qanday hujjatlar kerak?",ambiguous
+"Davlat xizmati nima?",ambiguous

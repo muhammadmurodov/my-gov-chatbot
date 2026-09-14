@@ -9,13 +9,14 @@ Design:
 
 Run from the repo root:  pytest -v
 """
+import os
 import types
 import pathlib
 
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-DSN = "postgresql://postgres:mygov@localhost:5433/mygov"
+DSN = os.getenv("DSN", "postgresql://postgres:mygov@localhost:5433/mygov")
 
 
 # --------------------------------------------------------------------------- #
@@ -29,9 +30,10 @@ def pipeline():
         import rag
         import hybrid
         import rerank
+        import api
     except Exception as e:  # noqa: BLE001 - want the reason in the skip message
         pytest.skip(f"pipeline modules unavailable ({type(e).__name__}: {e})")
-    return types.SimpleNamespace(rag=rag, hybrid=hybrid, rerank=rerank)
+    return types.SimpleNamespace(rag=rag, hybrid=hybrid, rerank=rerank, api=api)
 
 
 @pytest.fixture
@@ -79,17 +81,34 @@ def test_typo_fix_leaves_correct_word_unchanged(pipeline, db_cursor):
 # --------------------------------------------------------------------------- #
 # 2. two-layer grounding gate
 # --------------------------------------------------------------------------- #
-def test_offtopic_refuses_without_calling_llm(pipeline, monkeypatch):
-    """Classifier gate (P<0.15) must refuse BEFORE any LLM call. No DB needed:
-    the refusal happens before retrieval."""
+def test_offtopic_uses_guarded_fallback(pipeline, monkeypatch):
+    """Classifier gate (P<0.15) refuses BEFORE retrieval, but now via a reactive
+    fallback_response() LLM call — no DB touched (rows stay empty), exactly one LLM
+    call (the fallback, not an answer), and the reply is that fallback's text."""
     calls = []
-    _mock_llm(monkeypatch, pipeline,
-              reply=AssertionError("LLM must not be called for an off-topic query"),
-              recorder=calls)
+    _mock_llm(monkeypatch, pipeline, reply="FALLBACK_REPLY", recorder=calls)
     ans, rows = pipeline.rerank.answer("bugun ob-havo qanday?")
-    assert ans == "Menda bu haqda ishonchli ma'lumot yo'q."
-    assert rows == []
-    assert calls == []  # gate short-circuited before the LLM
+    assert ans == "FALLBACK_REPLY"
+    assert rows == []                   # off-topic -> no retrieval
+    assert len(calls) == 1             # the guarded fallback, and nothing else
+
+
+def test_fallback_degrades_to_static_when_llm_down(pipeline, monkeypatch):
+    """The refusal path must never itself error: if the fallback LLM call raises,
+    fallback_response returns the fixed per-reason string instead of propagating."""
+    _mock_llm(monkeypatch, pipeline, reply=RuntimeError("openrouter down"))
+    rk = pipeline.rerank
+    assert rk.fallback_response("q", rk.OUT_OF_SCOPE) == rk._HARD_FALLBACK[rk.OUT_OF_SCOPE]
+    assert (rk.fallback_response("q", rk.NO_SUPPORTING_CONTEXT)
+            == rk._HARD_FALLBACK[rk.NO_SUPPORTING_CONTEXT])
+
+
+def test_fallback_degrades_to_static_when_reply_overlong(pipeline, monkeypatch):
+    """A model that starts smuggling a real answer runs long; an over-cap reply is
+    treated as a leak and swapped for the hard fallback."""
+    rk = pipeline.rerank
+    _mock_llm(monkeypatch, pipeline, reply="x" * (rk._FALLBACK_MAX_CHARS + 1))
+    assert rk.fallback_response("q", rk.OUT_OF_SCOPE) == rk._HARD_FALLBACK[rk.OUT_OF_SCOPE]
 
 
 def test_ontopic_lowscore_passes_floor(pipeline, db_cursor, monkeypatch):
@@ -127,3 +146,148 @@ def test_classifier_loads_and_predicts(pipeline):
     proba = clf.predict_proba([emb])[0]
     assert len(proba) == 2                        # binary: off-topic / on-topic
     assert 0.0 <= float(proba[1]) <= 1.0
+
+
+# --------------------------------------------------------------------------- #
+# 5. RRF fusion (pure function — no DB/model)
+# --------------------------------------------------------------------------- #
+def test_rrf_fuses_and_ranks_by_summed_votes(pipeline):
+    """An item ranked highly in BOTH lists must beat items ranked highly in only
+    one, and every input id must survive the fusion."""
+    vec = ["a", "b", "c"]
+    fts = ["b", "a", "d"]
+    fused = pipeline.hybrid.rrf(vec, fts)
+    order = [cid for cid, _ in fused]
+    scores = dict(fused)
+    assert set(order) == {"a", "b", "c", "d"}      # union of both lists survives
+    # a and b each sit at ranks 0 and 1 across the two lists → they tie, and both
+    # outrank c and d, which appear in only one list.
+    assert set(order[:2]) == {"a", "b"}
+    assert scores["a"] == scores["b"]
+    assert scores["b"] > scores["c"]               # in both lists > in one list
+    assert scores["a"] > scores["d"]
+
+
+# --------------------------------------------------------------------------- #
+# 6. follow-up rewrite
+# --------------------------------------------------------------------------- #
+def test_rewrite_query_no_history_returns_raw(pipeline, monkeypatch):
+    """First turn: nothing to resolve against, so the question is returned as-is
+    WITHOUT an LLM call."""
+    calls = []
+    _mock_llm(monkeypatch, pipeline, reply="SHOULD_NOT_BE_USED", recorder=calls)
+    out = pipeline.rerank.rewrite_query([], "kadastr pasporti narxi qancha?")
+    assert out == "kadastr pasporti narxi qancha?"
+    assert calls == []                             # no history → no rewrite call
+
+
+def test_rewrite_query_uses_history(pipeline, monkeypatch):
+    """A follow-up with history is rewritten by the (mocked) LLM into a standalone."""
+    _mock_llm(monkeypatch, pipeline, reply="turar-joy kadastr pasporti narxi qancha?")
+    history = [{"role": "user", "content": "kadastr pasporti qanday olinadi?"},
+               {"role": "assistant", "content": "..."}]
+    out = pipeline.rerank.rewrite_query(history, "narxi qancha?")
+    assert out == "turar-joy kadastr pasporti narxi qancha?"
+
+
+def test_rewrite_query_falls_back_on_error(pipeline, monkeypatch):
+    """A rewriter failure must degrade to the raw question, not crash."""
+    _mock_llm(monkeypatch, pipeline, reply=RuntimeError("rewriter down"))
+    history = [{"role": "user", "content": "kadastr pasporti qanday olinadi?"}]
+    out = pipeline.rerank.rewrite_query(history, "narxi qancha?")
+    assert out == "narxi qancha?"                  # fell back to the raw question
+
+
+def test_rewrite_skips_selfcontained_new_topic(pipeline, monkeypatch):
+    """Regression: a self-contained question on a NEW topic must NOT be rewritten,
+    so the previous topic can't leak in. Here the prior turn was about kadastr; the
+    new question is a full tonirovka question and must pass through untouched, with
+    no LLM rewrite call."""
+    calls = []
+    _mock_llm(monkeypatch, pipeline, reply="CONTAMINATED_BY_KADASTR", recorder=calls)
+    history = [{"role": "user", "content": "kadastr haqida malumot ber"},
+               {"role": "assistant", "content": "Kadastr xizmatlari ..."}]
+    q = "tonirovka ruxsatnomasini olish necha pul"
+    assert pipeline.rerank.rewrite_query(history, q) == q
+    assert calls == []                             # self-contained -> no rewrite call
+
+
+def test_needs_rewrite_classification(pipeline):
+    """The follow-up gate: short/anaphoric questions rewrite; self-contained don't."""
+    nr = pipeline.rerank._needs_rewrite
+    assert nr("narxi qancha?")                     # 2 tokens -> elliptical
+    assert nr("muddati?")                          # 1 token
+    assert nr("uning narxi qancha")                # anaphora "uning"
+    assert not nr("tonirovka ruxsatnomasini olish necha pul")  # self-contained
+    assert not nr("kadastr haqida malumot ber")    # self-contained
+
+
+# --------------------------------------------------------------------------- #
+# 7. API layer — history filtering + endpoint contract (no DB/network)
+# --------------------------------------------------------------------------- #
+def test_split_keeps_only_user_assistant_history(pipeline):
+    """The last user message is the question; history keeps only user/assistant
+    turns so an Open WebUI system prompt can't stack onto SYSTEM_PROMPT."""
+    api = pipeline.api
+    msgs = [api.Message(role="system", content="Open WebUI injected prompt"),
+            api.Message(role="user", content="birinchi savol"),
+            api.Message(role="assistant", content="birinchi javob"),
+            api.Message(role="user", content="oxirgi savol")]
+    question, history = api._split_question_and_history(msgs)
+    assert question == "oxirgi savol"
+    assert history == [{"role": "user", "content": "birinchi savol"},
+                       {"role": "assistant", "content": "birinchi javob"}]
+    assert all(m["role"] in ("user", "assistant") for m in history)  # system dropped
+
+
+def test_split_no_user_message_returns_none(pipeline):
+    api = pipeline.api
+    msgs = [api.Message(role="system", content="only a system message")]
+    question, history = api._split_question_and_history(msgs)
+    assert question is None
+    assert history == []
+
+
+def _client(pipeline):
+    from fastapi.testclient import TestClient
+    return TestClient(pipeline.api.app)
+
+
+def test_api_chat_completion_shape(pipeline, monkeypatch):
+    """Non-streaming happy path: rerank.answer is mocked, so no DB/LLM. The
+    response must be OpenAI-shaped and carry the grounding sources."""
+    rows = [(378, "ID karta", "https://my.gov.uz/uz/service/378", "matn", "kw", 0.9)]
+    monkeypatch.setattr(pipeline.api.rerank, "answer",
+                        lambda q, history=None: ("MOCKED_ANSWER", rows))
+    r = _client(pipeline).post("/v1/chat/completions", json={
+        "model": "mygov-rag",
+        "messages": [{"role": "user", "content": "ID karta yo'qolsa?"}]})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["choices"][0]["message"]["content"] == "MOCKED_ANSWER"
+    assert body["sources"][0]["url"] == "https://my.gov.uz/uz/service/378"
+
+
+def test_api_error_boundary_returns_502(pipeline, monkeypatch):
+    """If the pipeline raises (DB down / LLM exhausted), the API returns a clean
+    OpenAI-shaped 502 instead of leaking a 500 + stack trace."""
+    def boom(q, history=None):
+        raise RuntimeError("DB unreachable")
+    monkeypatch.setattr(pipeline.api.rerank, "answer", boom)
+    r = _client(pipeline).post("/v1/chat/completions", json={
+        "messages": [{"role": "user", "content": "savol"}]})
+    assert r.status_code == 502
+    assert r.json()["error"]["type"] == "upstream_error"
+
+
+def test_api_no_user_message_returns_400(pipeline):
+    r = _client(pipeline).post("/v1/chat/completions", json={
+        "messages": [{"role": "system", "content": "no user turn"}]})
+    assert r.status_code == 400
+    assert r.json()["error"]["type"] == "invalid_request_error"
+
+
+def test_api_lists_the_model(pipeline):
+    r = _client(pipeline).get("/v1/models")
+    assert r.status_code == 200
+    assert r.json()["data"][0]["id"] == pipeline.api.MODEL_ID

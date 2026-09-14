@@ -12,7 +12,7 @@ Design (defensible in interview):
 - Every chunk stores service_id, title, url, chunk_index — needed for citations.
 - `embed_text` prepends the title so short chunks still have context when embedded.
 
-    python chunk_services.py data/services.jsonl data/chunks.jsonl
+    python pipeline/chunk_services.py data/services.jsonl data/chunks.jsonl
 """
 import json
 import re

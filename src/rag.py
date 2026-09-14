@@ -10,7 +10,9 @@ from dotenv import load_dotenv
 
 load_dotenv()  
 
-DSN = "postgresql://postgres:mygov@localhost:5433/mygov"
+# DB connection string. Read from env so the password isn't baked into source;
+# the localhost value is a local-dev fallback only.
+DSN = os.getenv("DSN", "postgresql://postgres:mygov@localhost:5433/mygov")
 # Pin a real model via OPENROUTER_MODEL for reliable answers + deterministic
 # rewrites; the "openrouter/free" default is a flaky auto-router (varies per call,
 # so temp=0 isn't truly deterministic and low-quality turns pollute chat history).
@@ -26,10 +28,11 @@ _client = OpenAI(
 SYSTEM_PROMPT = """Sen my.gov.uz davlat xizmatlari bo'yicha yordamchisan.
 
 QAT'IY QOIDALAR:
-- Faqat quyidagi KONTEKSTdagi ma'lumotga asoslanib javob ber.
-- Agar javob kontekstda bo'lmasa, aniq shu jumla bilan javob ber: "Menda bu haqda ishonchli ma'lumot yo'q." Hech narsani o'ylab topma.
+- Faqat quyida berilgan ma'lumotga asoslanib javob ber.
+- Agar javob berilgan ma'lumotda bo'lmasa, aniq shu jumla bilan javob ber: "Menda bu haqda ishonchli ma'lumot yo'q." Hech narsani o'ylab topma.
 - Har doim qaysi xizmatga asoslanganingni ko'rsat: xizmat nomi va havolasi (URL).
-- Narx, muddat, hujjatlar haqida faqat kontekstda yozilganini ayt - taxmin qilma.
+- Narx, muddat, hujjatlar haqida faqat berilgan ma'lumotda yozilganini ayt - taxmin qilma.
+- Javobingda "kontekst", "context", "berilgan ma'lumotga ko'ra" yoki shunga o'xshash ichki/texnik iboralarni ISHLATMA. Foydalanuvchiga to'g'ridan-to'g'ri, tabiiy javob ber.
 - Foydalanuvchi tilida javob ber (o'zbek/rus). Boshqa hech qanday belgi yoki teg chiqarma."""
 
 
@@ -41,7 +44,7 @@ def retrieve(question, k=TOP_K):
     cur.execute("""
         SELECT service_id, title, url, text, keywords, 1 - (embedding <=> %s) AS score
         FROM chunks
-        ORDER BY embedding <=> %sif
+        ORDER BY embedding <=> %s
         LIMIT %s;
     """, (qv, qv, k))
     rows = cur.fetchall()

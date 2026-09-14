@@ -4,6 +4,11 @@
 # --- editor (machine-local) ---
 .vscode/
 
+# --- open webui local runtime files (if serve is run from repo root) ---
+.webui_secret_key
+webui.db
+uploads/
+
 # --- python ---
 __pycache__/
 *.py[cod]
@@ -29,7 +34,7 @@ sphere1.html
 svc1000.html
 uz-service.xml
 
-# --- intermediate scrape output (regenerable via notebooks/scrape_services.py) ---
+# --- intermediate scrape output (regenerable via pipeline/scrape_services.py) ---
 data/raw/
 data/services/
 data/manifest.jsonl
