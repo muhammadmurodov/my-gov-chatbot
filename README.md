@@ -85,7 +85,7 @@ flowchart TD
     subgraph serve["Online — request path (src/)"]
         Q[User question] --> RW[rewrite_query<br/>follow-up → standalone]
         RW --> G1{Classifier gate<br/>P on-topic ≥ 0.20?}
-        G1 -- no --> R[Refuse:<br/>&quot;Menda bu haqda<br/>ishonchli ma'lumot yo'q.&quot;]
+        G1 -- no --> R["Refuse:<br/>#quot;Menda bu haqda<br/>ishonchli ma'lumot yo'q.#quot;"]
         G1 -- yes --> H[Hybrid retrieve<br/>vector + FTS → RRF]
         H --> RR[Cross-encoder rerank<br/>bge-reranker-v2-m3]
         RR --> G2{Grounding floor<br/>top score ≥ 0.05?}
