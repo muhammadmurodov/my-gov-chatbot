@@ -1,0 +1,123 @@
+/* ============================================================================
+   My.gov.uz — ChatGPT-style theme for Open WebUI
+   Loaded via the stock /static/custom.css hook (survives image upgrades).
+
+   Strategy: Open WebUI paints every surface from its --color-gray-* design
+   tokens, so we remap those tokens to the ChatGPT palette (this recolors the
+   sidebar, chat area, inputs, user bubble and hovers in one place) and then add
+   a few precise structural overrides (composer, send button, user bubble,
+   fonts). Dark-mode overrides are keyed to `html.dark` so they win specificity
+   over the app's `:root` tokens regardless of stylesheet load order, and never
+   touch light mode.
+   ============================================================================ */
+
+/* ---- 1. Typography: system font stack (ChatGPT-like) ---- */
+body,
+input,
+textarea,
+button,
+select,
+.markdown-prose,
+#chat-input {
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+		Arial, "Apple Color Emoji", "Segoe UI Emoji", sans-serif !important;
+}
+
+html {
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+	text-rendering: optimizeLegibility;
+}
+
+/* ---- 2. Palette (dark) — ChatGPT tones mapped onto OWUI tokens ----
+   sidebar  #171717 -> gray-950   (dark:bg-gray-950 = navigation)
+   bg       #212121 -> gray-900   (dark:bg-gray-900 = chat area)
+   hover    #2f2f2f -> gray-850   (dark:hover:bg-gray-850)
+   surface  #303030 -> gray-800   (user bubble / inputs / composer)
+   border   #424242 -> gray-700
+   text 2nd #b4b4b4 -> gray-400
+   muted    #8e8e8e -> gray-500                                            */
+html.dark {
+	--color-gray-950: #171717;
+	--color-gray-900: #212121;
+	--color-gray-850: #2f2f2f;
+	--color-gray-800: #303030;
+	--color-gray-700: #424242;
+	--color-gray-600: #565656;
+	--color-gray-500: #8e8e8e;
+	--color-gray-400: #b4b4b4;
+}
+
+/* ---- 3. Restrained, quiet scrollbars ---- */
+*::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+*::-webkit-scrollbar-track {
+	background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+	background: rgba(255, 255, 255, 0.12);
+	border-radius: 8px;
+}
+*::-webkit-scrollbar-thumb:hover {
+	background: rgba(255, 255, 255, 0.22);
+}
+* {
+	scrollbar-width: thin;
+	scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+
+/* ---- 4. Composer (input pill) ----
+   The composer is the only .rounded-3xl element wrapping #chat-input, so
+   :has() targets it precisely. Spec: elevated surface, 24px radius, 1px hair
+   border, extremely subtle shadow. */
+.dark .rounded-3xl:has(#chat-input) {
+	background-color: var(--color-gray-800); /* #303030 */
+	border-radius: 24px !important;
+	border: 1px solid var(--color-gray-700) !important; /* #424242 hairline */
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+.dark .rounded-3xl:has(#chat-input):focus-within {
+	border-color: #565656 !important;
+}
+
+/* Textarea/contenteditable inside the composer: ChatGPT metrics. */
+#chat-input {
+	font-size: 16px !important;
+	line-height: 24px !important;
+}
+
+/* ---- 5. Send button: 32px circle ---- */
+#send-message-button {
+	width: 32px !important;
+	height: 32px !important;
+	border-radius: 9999px !important;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: background-color 0.15s ease, transform 0.1s ease;
+}
+#send-message-button:active {
+	transform: scale(0.94);
+}
+
+/* Composer tool buttons (+ , mic, …): quiet circular icon buttons. */
+.dark .rounded-3xl:has(#chat-input) button:not(#send-message-button) {
+	border-radius: 9999px;
+}
+.dark .rounded-3xl:has(#chat-input) button:not(#send-message-button):hover {
+	background-color: rgba(255, 255, 255, 0.08);
+}
+
+/* ---- 6. User message bubble: softer 18px radius (assistant stays bubble-less).
+   Background already flows from --color-gray-800 (#303030) via the token above. */
+.chat-user .rounded-3xl {
+	border-radius: 18px !important;
+}
+
+/* ---- 7. Shadows: keep everything extremely subtle. Soften the heavy shadow
+   OWUI puts on the composer's floating menus/cards without removing depth. */
+.dark .shadow-lg {
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 12px rgba(0, 0, 0, 0.1) !important;
+}

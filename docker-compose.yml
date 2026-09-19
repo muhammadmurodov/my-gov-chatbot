@@ -1,23 +1,45 @@
-# Open WebUI as the chat frontend for the my.gov.uz RAG API.
+# My.gov.uz RAG stack — containerized pieces.
 #
-# The RAG API runs on the HOST (it needs the GPU, the models, and Postgres). Bind it to
-# 0.0.0.0, NOT the default 127.0.0.1, or this container can't reach it via
-# host.docker.internal:
-#   uvicorn api:app --app-dir src --host 0.0.0.0 --port 8000
+# Two services run in Docker: Postgres/pgvector (the vector DB) and Open WebUI
+# (the chat frontend). The RAG API itself runs on the HOST (it needs the GPU and
+# the local HF models); it reaches Postgres via localhost:5433 and Open WebUI
+# reaches the API via host.docker.internal:8000.
 #
-# This container only serves the chat UI and forwards requests to that host API
-# via the OpenAI-compatible endpoints it exposes (/v1/models, /v1/chat/completions).
+#   docker compose up -d
 #
-#   docker compose up -d      # then open http://localhost:3000
-#
-# On the first visit Open WebUI asks you to create a local admin account; the
-# "mygov-rag" model then appears in the model picker automatically.
+# NOTE (first run only): a Postgres container named "mygov-pg" already exists from
+# an earlier manual `docker run`. Compose can't adopt a container it didn't create,
+# so remove that one FIRST — the data lives in the external volume "mygov_pgdata"
+# and is NOT deleted by removing the container:
+#   docker rm -f mygov-pg
+#   docker compose up -d
 services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: mygov-pg
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=mygov
+      - POSTGRES_DB=mygov
+    ports:
+      # host 5433 -> container 5432, so the host API's DSN (localhost:5433) works
+      - "5433:5432"
+    volumes:
+      # the existing named volume that already holds the 926-chunk corpus
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d mygov"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
     container_name: mygov-webui
     ports:
-      - "3000:8080"
+      # host 3001 (3000 is taken by another project on this machine) -> container 8080
+      - "3001:8080"
     extra_hosts:
       # lets the container reach the API running on the host (needed on Linux)
       - "host.docker.internal:host-gateway"
@@ -28,10 +50,51 @@ services:
       - OPENAI_API_KEY=sk-mygov-local
       # this is a single-model RAG backend, not a general chat client
       - ENABLE_OLLAMA_API=false
+      # app name shown in the browser tab, header, and greeting
+      - WEBUI_NAME=My.gov.uz
     volumes:
       # persists accounts, chat history, and settings across restarts
       - open-webui:/app/backend/data
+      # --- custom My.gov.uz branding (logo / favicon / splash) ---
+      # The image ships these assets inside its own filesystem, so recreating the
+      # container would otherwise revert them. Bind-mounting from ./branding makes
+      # the custom logo durable. Open WebUI serves /static from both dirs below,
+      # so each file is overlaid in both to be safe; favicon.png is also the build
+      # root icon. All read-only.
+      - ./branding/favicon.png:/app/build/favicon.png:ro
+      - ./branding/favicon.png:/app/build/static/favicon.png:ro
+      - ./branding/favicon.png:/app/backend/open_webui/static/favicon.png:ro
+      - ./branding/favicon-96x96.png:/app/build/static/favicon-96x96.png:ro
+      - ./branding/favicon-96x96.png:/app/backend/open_webui/static/favicon-96x96.png:ro
+      - ./branding/favicon.ico:/app/build/static/favicon.ico:ro
+      - ./branding/favicon.ico:/app/backend/open_webui/static/favicon.ico:ro
+      - ./branding/favicon.svg:/app/build/static/favicon.svg:ro
+      - ./branding/favicon.svg:/app/backend/open_webui/static/favicon.svg:ro
+      - ./branding/apple-touch-icon.png:/app/build/static/apple-touch-icon.png:ro
+      - ./branding/apple-touch-icon.png:/app/backend/open_webui/static/apple-touch-icon.png:ro
+      - ./branding/logo.png:/app/build/static/logo.png:ro
+      - ./branding/logo.png:/app/backend/open_webui/static/logo.png:ro
+      - ./branding/splash.png:/app/build/static/splash.png:ro
+      - ./branding/splash.png:/app/backend/open_webui/static/splash.png:ro
+      - ./branding/splash-dark.png:/app/build/static/splash-dark.png:ro
+      - ./branding/splash-dark.png:/app/backend/open_webui/static/splash-dark.png:ro
+      - ./branding/web-app-manifest-192x192.png:/app/build/static/web-app-manifest-192x192.png:ro
+      - ./branding/web-app-manifest-192x192.png:/app/backend/open_webui/static/web-app-manifest-192x192.png:ro
+      - ./branding/web-app-manifest-512x512.png:/app/build/static/web-app-manifest-512x512.png:ro
+      - ./branding/web-app-manifest-512x512.png:/app/backend/open_webui/static/web-app-manifest-512x512.png:ro
+      # --- UI customization hooks (Open WebUI loads these on every page) ---
+      # custom.css: ChatGPT-style dark palette + scrollbar/type polish.
+      # loader.js: makes the dark theme the first-visit default.
+      - ./branding/custom.css:/app/build/static/custom.css:ro
+      - ./branding/custom.css:/app/backend/open_webui/static/custom.css:ro
+      - ./branding/loader.js:/app/build/static/loader.js:ro
+      - ./branding/loader.js:/app/backend/open_webui/static/loader.js:ro
     restart: unless-stopped
 
 volumes:
   open-webui:
+  pgdata:
+    # reuse the pre-existing volume (created by the earlier manual container)
+    # instead of letting compose create a new empty "<project>_pgdata"
+    external: true
+    name: mygov_pgdata

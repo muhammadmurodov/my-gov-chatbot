@@ -148,15 +148,24 @@ def fallback_response(question, reason):
 # fires for these (or very short questions); a self-contained new-topic question
 # like "tonirovka ruxsatnomasi necha pul" is left alone, so the previous topic
 # can't be dragged into it by the rewriter.
+# Anaphora / continuation cues that mark a question as context-dependent (a genuine
+# follow-up). Kept DELIBERATELY narrow: only real pronouns/demonstratives and the
+# "again/more/above" continuation words. Pure conjunctions and "also/too/and/but"
+# (uz "va", "ham"; ru "а", "тоже", "также") were REMOVED — they appear in ordinary
+# standalone questions ("Pasport VA viza uchun nima kerak?"), so treating them as
+# follow-up cues wrongly folded the previous topic's history into a new-topic answer
+# (cross-topic bleed). NB: a semantic question-vs-question similarity gate was tried
+# and rejected — on real traffic follow-ups (0.34-0.89) and topic switches (0.40-0.54)
+# overlap, so cosine can't separate them; this lexical rule does (see git history).
 _FOLLOWUP_CUES = {
-    # uz
+    # uz — pronouns / demonstratives / continuation
     "uning", "buning", "shuning", "uni", "buni", "shuni", "unga", "bunga",
     "undan", "bundan", "u", "bu", "shu", "ushbu", "o'sha", "osha", "yuqoridagi",
     "ular", "ularni", "ularning", "ulardan", "ularga",
-    "yana", "ham", "-chi", "chi", "va",
-    # ru
+    "yana", "-chi", "chi",
+    # ru — pronouns / demonstratives / continuation
     "его", "ее", "её", "их", "они", "это", "этот", "эта", "том", "нем", "нём",
-    "туда", "тоже", "также", "а",
+    "туда",
 }
 # At or below this many word tokens a question is treated as elliptical (e.g.
 # "narxi qancha?", "muddati?") and rewritten against history.

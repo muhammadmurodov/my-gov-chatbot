@@ -20,9 +20,17 @@ MODEL_LLM = os.getenv("OPENROUTER_MODEL", "openrouter/free")
 TOP_K = 5
 
 _embedder = SentenceTransformer("BAAI/bge-m3")
+# Provider-agnostic OpenAI-compatible client. Defaults to OpenRouter; point
+# OPENAI_BASE_URL at any OpenAI-compatible endpoint (e.g. Gemini's
+# https://generativelanguage.googleapis.com/v1beta/openai/) to switch providers
+# without code changes. OPENROUTER_API_KEY holds whichever provider's key.
 _client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=os.environ["OPENROUTER_API_KEY"],
+    base_url=os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1"),
+    api_key=os.getenv("OPENROUTER_API_KEY", "unused"),
+    # Fail fast instead of hanging the whole request when a provider is slow or
+    # returns a retryable error (e.g. a 503 "high demand" on an overloaded model).
+    timeout=float(os.getenv("LLM_TIMEOUT", "30")),
+    max_retries=int(os.getenv("LLM_MAX_RETRIES", "1")),
 )
 
 SYSTEM_PROMPT = """Sen my.gov.uz davlat xizmatlari bo'yicha yordamchisan.

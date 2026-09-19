@@ -1,0 +1,82 @@
+======================================================================
+ My-gov RAG stack — how to run backend + frontend
+======================================================================
+
+Three pieces:
+  1. Postgres/pgvector   -> docker container "mygov-pg"    (host port 5433)
+  2. Backend RAG API     -> runs on the HOST from mygov/   (host port 8000)
+  3. Frontend Open WebUI -> docker container "mygov-webui" (host port 3001)
+
+Run everything from the repo root:
+  cd "/mnt/NewData/vs code/My-gov"
+
+----------------------------------------------------------------------
+ 0. Prereqs (only if the containers aren't up yet)
+----------------------------------------------------------------------
+Check what's running:
+  docker ps --format '{{.Names}}\t{{.Ports}}'
+
+Postgres and Open WebUI are long-lived containers. If they exist but are
+stopped, just start them (don't recreate — that wipes the WebUI accounts):
+  docker start mygov-pg
+  docker start mygov-webui
+
+Open WebUI lives on host port 3001 here (compose default 3000 is taken by
+another project). If mygov-webui doesn't exist yet, create it once:
+  docker run -d --name mygov-webui \
+    -p 3001:8080 \
+    --add-host host.docker.internal:host-gateway \
+    -e OPENAI_API_BASE_URL=http://host.docker.internal:8000/v1 \
+    -e OPENAI_API_KEY=sk-mygov-local \
+    -e ENABLE_OLLAMA_API=false \
+    -v open-webui:/app/backend/data \
+    --restart unless-stopped \
+    ghcr.io/open-webui/open-webui:main
+
+----------------------------------------------------------------------
+ 1. Backend RAG API  (host port 8000)  <-- the piece you start each session
+----------------------------------------------------------------------
+NOTE: do NOT use `uvicorn api:app --app-dir src` directly — uvicorn's
+import path resolution fails to find the offline Hugging Face model cache
+and dies with "BAAI/bge-m3 does not appear to have a file named
+pytorch_model.bin". A plain `import api` in the same interpreter loads both
+models cleanly, so launch through the tiny inline launcher below.
+
+  cd "/mnt/NewData/vs code/My-gov"
+  HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HOME=/mnt/NewData/hf-cache \
+  ./mygov/bin/python - <<'PY'
+import os, sys, uvicorn
+repo = os.getcwd()
+sys.path.insert(0, os.path.join(repo, "src"))
+from api import app
+uvicorn.run(app, host="0.0.0.0", port=8000)
+PY
+
+Leave that terminal running. First start loads bge-m3 + bge-reranker-v2-m3
+(a few seconds). The answer LLM needs OPENROUTER_API_KEY in .env (already set).
+
+Verify it's up:
+  curl -s localhost:8000/v1/models
+  curl -s localhost:8000/v1/chat/completions -H 'content-type: application/json' \
+    -d '{"model":"mygov-rag","messages":[{"role":"user","content":"salom"}]}'
+
+----------------------------------------------------------------------
+ 2. Frontend Open WebUI  (host port 3001)
+----------------------------------------------------------------------
+Already running as container mygov-webui (see step 0). Then open:
+  http://localhost:3001
+
+First visit asks you to create a local admin account. The "mygov-rag" model
+appears in the picker automatically. The UI forwards chats to the host API
+at http://host.docker.internal:8000/v1.
+
+----------------------------------------------------------------------
+ Gotchas
+----------------------------------------------------------------------
+- Bind the API to 0.0.0.0 (the launcher above does), NOT 127.0.0.1, or the
+  Open WebUI container can't reach it via host.docker.internal.
+- Don't `docker rm` / recreate mygov-webui to restart it — use `docker start`.
+  Recreating without the same -v open-webui volume loses accounts + history.
+- If model weights ever go missing (root disk filled), they live under
+  HF_HOME=/mnt/NewData/hf-cache; re-download bge-m3 + bge-reranker-v2-m3.
+======================================================================
